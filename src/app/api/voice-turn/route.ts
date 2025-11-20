@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     // 3) TTS – Convert patient reply to audio
     //
     const speech = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
+      model: "gpt-4o-realtime-preview",
       voice: "alloy",
       input: patientText,
       response_format: "mp3",
