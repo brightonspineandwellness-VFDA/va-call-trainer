@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ClinicConfig } from "../../types/config";
+import type { ClinicConfig } from "../types/config";
+
+
 const defaultConfig: ClinicConfig = {
   clinicName: "",
   doctorName: "",

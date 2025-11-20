@@ -1,7 +1,8 @@
 // src/app/api/voice-turn/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import type { ClinicConfig } from "../../../types/config";
+import type { ClinicConfig } from "../../types/config";
+
 
 export const runtime = "nodejs"; // we need Node for the OpenAI SDK
 

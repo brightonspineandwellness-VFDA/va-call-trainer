@@ -1,3 +1,4 @@
+// src/types/config.ts
 export type ClinicServices = {
   decompression: boolean;
   classIVLaser: boolean;

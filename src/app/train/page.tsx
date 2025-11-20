@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import type { ClinicConfig } from "../../types/config";
+import type { ClinicConfig } from "../types/config";
 
 type ModeId = "easy" | "challenging" | "skeptical" | "creepy";
 type Role = "staff" | "patient";

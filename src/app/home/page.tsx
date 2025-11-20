@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { ClinicConfig } from "../../types/config";
+import type { ClinicConfig } from "../types/config";
 
 type ModeId = "easy" | "challenging" | "skeptical" | "creepy";
 
