@@ -120,12 +120,18 @@ export async function POST(req: NextRequest) {
     ];
 
     // 3) Convert patient reply text to speech
-    const speech = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts", // if this errors, use another TTS model from your dashboard
-      voice: "alloy",
-      input: patientText,
-      format: "mp3",
-    });
+    // 3) Convert patient reply text to speech (OpenAI TTS)
+const speech = await openai.audio.speech.create({
+  model: "gpt-4o-mini-tts",
+  voice: "alloy",
+  input: patientText,
+  response_format: "mp3"
+});
+
+const audioBuffer = Buffer.from(await speech.arrayBuffer());
+const audioBase64 = audioBuffer.toString("base64");
+
+
 
     const audioBuffer = Buffer.from(await speech.arrayBuffer());
     const audioBase64 = audioBuffer.toString("base64");
