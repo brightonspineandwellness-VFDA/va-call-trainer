@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import type { ClinicConfig } from "../../types/config";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-
-export const runtime = "nodejs"; // required for OpenAI SDK on Vercel
+export const runtime = "nodejs";
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY!,
 });
 
 type Role = "staff" | "patient";
@@ -20,46 +18,31 @@ function buildPatientSystemPrompt(clinic: ClinicConfig, mode: string) {
   return `
 You are simulating a new patient calling a chiropractic office.
 
-Clinic details:
+Clinic:
 - Name: ${clinic.clinicName}
 - Doctor: ${clinic.doctorName}
 - First visit cost: $${clinic.firstVisitCost}
 - Address: ${clinic.address}
 - Office hours: ${clinic.officeHours}
-- Services: chiropractic${
-    clinic.services.decompression ? ", decompression" : ""
-  }${clinic.services.classIVLaser ? ", Class IV laser" : ""}${
-    clinic.services.shockwave ? ", shockwave" : ""
-  }.
+- Services: chiropractic${clinic.services.decompression ? ", decompression" : ""}${clinic.services.classIVLaser ? ", Class IV laser" : ""}${clinic.services.shockwave ? ", shockwave" : ""}
 
-General rules:
-- Keep replies short (1–2 sentences).
-- Natural tone.
-- Intent: schedule an appointment.
-- Ask realistic questions about cost, insurance, visit length, "will this work".
-- Staff leads, you respond.
-- NO explicit or graphic content.
-
-Mode behavior:
-- easy: cooperative.
-- challenging: asks more questions about cost, insurance, time.
-- skeptical: lots of objections about cost, x-rays, effectiveness.
-- creepy: mildly inappropriate, but never explicit or abusive (tests boundaries).
-
-Respond ONLY with what the patient says next.
 Mode: ${mode}
-`.trim();
+
+Rules:
+- Keep messages short (1–2 sentences).
+- You only reply as the patient.
+- No internal thoughts.
+`;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // Expect multipart/form-data: audio file + JSON fields
-    const formData = await req.formData();
+    const form = await req.formData();
 
-    const audioFile = formData.get("audio") as File | null;
-    const mode = (formData.get("mode") as string) || "easy";
-    const clinicJson = formData.get("clinicConfig") as string | null;
-    const turnsJson = formData.get("turns") as string | null;
+    const audioFile = form.get("audio") as File;
+    const mode = (form.get("mode") as string) || "easy";
+    const clinicJson = form.get("clinicConfig") as string;
+    const turnsJson = form.get("turns") as string;
 
     if (!audioFile || !clinicJson || !turnsJson) {
       return NextResponse.json(
@@ -68,33 +51,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const clinicConfig = JSON.parse(clinicJson) as ClinicConfig;
-    const turns = JSON.parse(turnsJson) as Turn[];
+    const clinicConfig: ClinicConfig = JSON.parse(clinicJson);
+    const turns: Turn[] = JSON.parse(turnsJson);
 
-    //
-    // 1) Transcribe staff audio
-    //
+    // 1) TRANSCRIBE STAFF AUDIO
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
-      model: "gpt-4o-mini-transcribe", // or "whisper-1" if needed
+      model: "whisper-1",
     });
 
-    const staffText = (transcription.text || "").trim();
+    const staffText = transcription.text.trim();
 
-    const updatedTurns: Turn[] = [
-      ...turns,
-      { role: "staff", text: staffText },
-    ];
+    const updatedTurns: Turn[] = [...turns, { role: "staff", text: staffText }];
 
-    //
-    // 2) Get patient reply via Chat Completions
-    //
+    // 2) PATIENT AI REPLY
     const systemPrompt = buildPatientSystemPrompt(clinicConfig, mode);
 
-    const messages: ChatCompletionMessageParam[] = [
-      { role: "system", content: systemPrompt },
-      ...updatedTurns.map<ChatCompletionMessageParam>((t) => ({
-        role: t.role === "staff" ? "user" : "assistant",
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      ...updatedTurns.map((t) => ({
+        role: t.role === "staff" ? ("user" as const) : ("assistant" as const),
         content: t.text,
       })),
     ];
@@ -106,16 +82,14 @@ export async function POST(req: NextRequest) {
     });
 
     const patientText =
-      chat.choices[0]?.message?.content?.trim() || "...";
+      chat.choices[0]?.message?.content?.trim() || "Okay, go ahead.";
 
     const finalTurns: Turn[] = [
       ...updatedTurns,
       { role: "patient", text: patientText },
     ];
 
-    //
-    // 3) TTS – Convert patient reply to audio
-    //
+    // 3) SPEECH (TTS)
     const speech = await openai.audio.speech.create({
       model: "gpt-4o-realtime-preview",
       voice: "alloy",
@@ -126,9 +100,6 @@ export async function POST(req: NextRequest) {
     const audioBuffer = Buffer.from(await speech.arrayBuffer());
     const audioBase64 = audioBuffer.toString("base64");
 
-    //
-    // 4) Return JSON payload
-    //
     return NextResponse.json({
       staffText,
       patientText,
@@ -136,7 +107,7 @@ export async function POST(req: NextRequest) {
       turns: finalTurns,
     });
   } catch (err) {
-    console.error("VOICE API ERROR:", err);
+    console.error(err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
