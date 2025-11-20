@@ -1,10 +1,9 @@
-// src/app/api/voice-turn/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import type { ClinicConfig } from "../../types/config";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
-
-export const runtime = "nodejs"; // we need Node for the OpenAI SDK
+export const runtime = "nodejs"; // required for OpenAI SDK on Vercel
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -33,29 +32,21 @@ Clinic details:
     clinic.services.shockwave ? ", shockwave" : ""
   }.
 
-The staff member is a VA in training for inbound new patient calls.
-
 General rules:
-- ALWAYS have clear intent to schedule an appointment.
-- Do NOT open with random questions. You are calling to book.
-- Use short, natural sentences (1–2 per reply).
-- Let the STAFF lead the call. You react.
-- Ask realistic follow-up questions about cost, time, insurance, x-rays, and "will this really work" especially in challenging/skeptical modes.
-- If STAFF forgets something important (like first visit cost, what to bring, when you’re scheduled), you should politely ask.
+- Keep replies short (1–2 sentences).
+- Natural tone.
+- Intent: schedule an appointment.
+- Ask realistic questions about cost, insurance, visit length, "will this work".
+- Staff leads, you respond.
+- NO explicit or graphic content.
 
 Mode behavior:
-- easy: cooperative, minimal questions, focus on booking.
-- challenging: intent to book but asks about first visit cost, insurance, visit length.
-- skeptical: multiple objections about cost, number of visits, "will this really work?", x-rays; may or may not book depending on how clear and honest the staff is.
-- creepy: first 1–2 turns normal, then moderately inappropriate (mild flirtation, personal questions); never explicit or abusive; test if staff sets boundaries or ends call.
+- easy: cooperative.
+- challenging: asks more questions about cost, insurance, time.
+- skeptical: lots of objections about cost, x-rays, effectiveness.
+- creepy: mildly inappropriate, but never explicit or abusive (tests boundaries).
 
-Always stay within these boundaries:
-- DO NOT be explicit, graphic, or threatening.
-- Keep the conversation focused on the appointment and their behavior.
-
-You respond ONLY with what the patient says next.
-Do not describe internal thoughts.
-
+Respond ONLY with what the patient says next.
 Mode: ${mode}
 `.trim();
 }
@@ -65,10 +56,10 @@ export async function POST(req: NextRequest) {
     // Expect multipart/form-data: audio file + JSON fields
     const formData = await req.formData();
 
-    const audioFile = formData.get("audio");
+    const audioFile = formData.get("audio") as File | null;
     const mode = (formData.get("mode") as string) || "easy";
-    const clinicJson = formData.get("clinicConfig") as string;
-    const turnsJson = formData.get("turns") as string;
+    const clinicJson = formData.get("clinicConfig") as string | null;
+    const turnsJson = formData.get("turns") as string | null;
 
     if (!audioFile || !clinicJson || !turnsJson) {
       return NextResponse.json(
@@ -80,11 +71,12 @@ export async function POST(req: NextRequest) {
     const clinicConfig = JSON.parse(clinicJson) as ClinicConfig;
     const turns = JSON.parse(turnsJson) as Turn[];
 
+    //
     // 1) Transcribe staff audio
-    const audioBlob = audioFile as File; // Next.js gives a File-like object
+    //
     const transcription = await openai.audio.transcriptions.create({
-      file: audioBlob,
-      model: "gpt-4o-mini-transcribe", // if this errors, switch to "whisper-1"
+      file: audioFile,
+      model: "gpt-4o-mini-transcribe", // or "whisper-1" if needed
     });
 
     const staffText = (transcription.text || "").trim();
@@ -94,13 +86,15 @@ export async function POST(req: NextRequest) {
       { role: "staff", text: staffText },
     ];
 
-    // 2) Get patient reply (Chat Completions)
+    //
+    // 2) Get patient reply via Chat Completions
+    //
     const systemPrompt = buildPatientSystemPrompt(clinicConfig, mode);
 
-    const messages = [
-      { role: "system" as const, content: systemPrompt },
-      ...updatedTurns.map((t) => ({
-        role: t.role === "staff" ? ("user" as const) : ("assistant" as const),
+    const messages: ChatCompletionMessageParam[] = [
+      { role: "system", content: systemPrompt },
+      ...updatedTurns.map<ChatCompletionMessageParam>((t) => ({
+        role: t.role === "staff" ? "user" : "assistant",
         content: t.text,
       })),
     ];
@@ -119,23 +113,22 @@ export async function POST(req: NextRequest) {
       { role: "patient", text: patientText },
     ];
 
-    // 3) Convert patient reply text to speech
-    // 3) Convert patient reply text to speech (OpenAI TTS)
-const speech = await openai.audio.speech.create({
-  model: "gpt-4o-mini-tts",
-  voice: "alloy",
-  input: patientText,
-  response_format: "mp3"
-});
-
-const audioBuffer = Buffer.from(await speech.arrayBuffer());
-const audioBase64 = audioBuffer.toString("base64");
-
-
+    //
+    // 3) TTS – Convert patient reply to audio
+    //
+    const speech = await openai.audio.speech.create({
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      input: patientText,
+      response_format: "mp3",
+    });
 
     const audioBuffer = Buffer.from(await speech.arrayBuffer());
     const audioBase64 = audioBuffer.toString("base64");
 
+    //
+    // 4) Return JSON payload
+    //
     return NextResponse.json({
       staffText,
       patientText,
@@ -143,7 +136,7 @@ const audioBase64 = audioBuffer.toString("base64");
       turns: finalTurns,
     });
   } catch (err) {
-    console.error(err);
+    console.error("VOICE API ERROR:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
